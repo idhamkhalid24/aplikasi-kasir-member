@@ -152,21 +152,46 @@
             border-top: none;
             border-radius: 0 0 12px 12px;
             z-index: 100;
-            max-height: 150px;
+            max-height: 200px;
             overflow-y: auto;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
             display: none;
         }
 
         .suggestion-item {
-            padding: 10px 12px;
-            font-size: 12px;
-            font-weight: 700;
-            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
             border-bottom: 1px solid #f1f5f9;
+            cursor: pointer;
         }
 
-        .suggestion-item:hover { background: #fffbeb; color: var(--accent); }
+        .suggestion-item:hover { background: #fffbeb; }
+
+        .suggestion-text {
+            flex: 1;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .suggestion-delete {
+            background: #fee2e2;
+            color: var(--danger);
+            border: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .suggestion-delete:hover { background: var(--danger); color: white; }
 
         .btn-action {
             grid-column: span 2;
@@ -351,8 +376,8 @@
                 <div class="grid-inputs">
                     <div class="input-box full-width">
                         <label>NAMA BARANG</label>
-                        <input type="text" id="itemName" placeholder="NAMA HIJAB..." autocomplete="off" oninput="handleNameInput(this)">
-                        <!-- Pengganti datalist bawaan -->
+                        <input type="text" id="itemName" placeholder="NAMA HIJAB..." autocomplete="off" oninput="handleNameInput(this)" onfocus="handleNameInput(this)">
+                        <!-- Custom Suggestion Box -->
                         <div id="suggestionBox" class="suggestion-list"></div>
                     </div>
 
@@ -435,39 +460,64 @@
             setTimeout(() => { el.style.display = 'none'; }, 2000);
         }
 
-        // Fungsi input nama dengan suggestion kustom
+        // Fungsi input nama dengan suggestion kustom + Hapus Riwayat per item
         function handleNameInput(input) {
             input.value = input.value.toUpperCase();
             const val = input.value.trim();
             const box = document.getElementById('suggestionBox');
             
-            if (val.length > 0) {
-                const filtered = savedNames.filter(name => name.includes(val)).sort();
-                if (filtered.length > 0) {
-                    box.innerHTML = "";
-                    filtered.forEach(name => {
-                        const div = document.createElement('div');
-                        div.className = 'suggestion-item';
-                        div.innerText = name;
-                        div.onclick = () => {
-                            input.value = name;
-                            box.style.display = 'none';
-                        };
-                        box.appendChild(div);
-                    });
-                    box.style.display = 'block';
-                } else {
-                    box.style.display = 'none';
-                }
+            const filtered = val.length > 0 
+                ? savedNames.filter(name => name.includes(val)).sort() 
+                : savedNames.sort();
+
+            if (filtered.length > 0) {
+                box.innerHTML = "";
+                filtered.forEach(name => {
+                    const div = document.createElement('div');
+                    div.className = 'suggestion-item';
+                    
+                    // Area teks (untuk pilih)
+                    const textSpan = document.createElement('span');
+                    textSpan.className = 'suggestion-text';
+                    textSpan.innerText = name;
+                    textSpan.onclick = (e) => {
+                        input.value = name;
+                        box.style.display = 'none';
+                    };
+
+                    // Tombol hapus riwayat (X)
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'suggestion-delete';
+                    delBtn.innerText = '×';
+                    delBtn.title = 'Hapus dari riwayat';
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation(); // Biar input nggak kepilih
+                        removeHistoryName(name);
+                        handleNameInput(input); // Refresh list
+                    };
+
+                    div.appendChild(textSpan);
+                    div.appendChild(delBtn);
+                    box.appendChild(div);
+                });
+                box.style.display = 'block';
             } else {
                 box.style.display = 'none';
             }
         }
 
+        function removeHistoryName(nameToRemove) {
+            savedNames = savedNames.filter(n => n !== nameToRemove);
+            localStorage.setItem('rocky_names_v8', JSON.stringify(savedNames));
+            showAlert("RIWAYAT '" + nameToRemove + "' DIHAPUS");
+        }
+
         // Tutup suggestion jika klik di luar
         document.addEventListener('click', (e) => {
-            if (e.target.id !== 'itemName') {
-                document.getElementById('suggestionBox').style.display = 'none';
+            const box = document.getElementById('suggestionBox');
+            const input = document.getElementById('itemName');
+            if (e.target !== input && !box.contains(e.target)) {
+                box.style.display = 'none';
             }
         });
 
