@@ -460,13 +460,11 @@
             setTimeout(() => { el.style.display = 'none'; }, 2000);
         }
 
-        // Fungsi input nama: Hanya muncul jika ada minimal 1 huruf yang diketik
         function handleNameInput(input) {
             input.value = input.value.toUpperCase();
             const val = input.value.trim();
             const box = document.getElementById('suggestionBox');
             
-            // Aturan baru: Jika input kosong, sembunyikan suggestion
             if (val.length === 0) {
                 box.style.display = 'none';
                 return;
@@ -708,6 +706,8 @@
             const time = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
             
             let totalSale = 0, totalRetur = 0;
+            const saleItems = cart.filter(i => i.type === 'sale');
+            const returItems = cart.filter(i => i.type === 'retur');
             
             let msg = `*ROCKY HIJAB*\n`;
             msg += `_STRUK MEMBER VVIP_\n`;
@@ -715,25 +715,34 @@
             msg += `Tgl : ${date} (${time})\n`;
             msg += `------------------------------------------\n\n`;
             
-            cart.filter(i => i.type === 'sale').forEach(item => {
-                totalSale += item.subtotal;
-                msg += `✅ *${item.name}*\n`;
-                msg += `   ${item.qty} x Rp ${item.priceUnit.toLocaleString('id-ID')} = *Rp ${item.subtotal.toLocaleString('id-ID')}*\n\n`;
-            });
+            // 1. Daftar Belanja
+            if (saleItems.length > 0) {
+                saleItems.forEach(item => {
+                    totalSale += item.subtotal;
+                    msg += `✅ *${item.name}*\n`;
+                    msg += `   ${item.qty} x Rp ${item.priceUnit.toLocaleString('id-ID')} = *Rp ${item.subtotal.toLocaleString('id-ID')}*\n\n`;
+                });
+            }
 
-            const returList = cart.filter(i => i.type === 'retur');
-            if (returList.length > 0) {
+            // 2. Daftar Retur
+            if (returItems.length > 0) {
                 msg += `*RINCIAN RETUR*:\n`;
                 msg += `------------------------------------------\n`;
-                returList.forEach(item => {
+                returItems.forEach(item => {
                     totalRetur += item.subtotal;
                     msg += `❌ *${item.name}*\n`;
                     msg += `   ${item.qty} x Rp ${item.priceUnit.toLocaleString('id-ID')} = *-Rp ${item.subtotal.toLocaleString('id-ID')}*\n\n`;
                 });
             }
 
+            // 3. Ringkasan Akhir
             msg += `------------------------------------------\n`;
-            msg += `*TOTAL BAYAR : RP ${(totalSale - totalRetur).toLocaleString('id-ID')}*\n`;
+            msg += `TOTAL BELANJA : RP ${totalSale.toLocaleString('id-ID')}\n`;
+            if (totalRetur > 0) {
+                msg += `TOTAL RETUR    : -RP ${totalRetur.toLocaleString('id-ID')}\n`;
+            }
+            msg += `------------------------------------------\n`;
+            msg += `*SISA BAYAR   : RP ${(totalSale - totalRetur).toLocaleString('id-ID')}*\n`;
             msg += `------------------------------------------\n\n`;
             msg += `_Terima kasih telah berbelanja_`;
 
