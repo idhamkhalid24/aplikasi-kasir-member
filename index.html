@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rocky Hijab - VVIP + Auto Copy Struk (IndexedDB)</title>
+    <title>Rocky Hijab - VVIP + Auto Copy Struk</title>
     <style>
-        /* CSS sama persis dengan sebelumnya - tidak ada perubahan */
         :root {
             --primary: #0f172a;
             --accent: #f59e0b;
@@ -702,44 +701,11 @@
             font-style: normal;
             font-size: 12px;
         }
-
-        /* Loading indicator */
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 5000;
-        }
-        
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid var(--accent);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
     </style>
 </head>
 <body>
 
     <div id="customAlert">PERINGATAN</div>
-    
-    <!-- Loading Indicator -->
-    <div id="loadingOverlay" class="loading-overlay">
-        <div class="loading-spinner"></div>
-    </div>
 
     <!-- Print Area (hidden normally) -->
     <div id="printArea" style="display: none;"></div>
@@ -854,7 +820,7 @@
     <div class="app-container">
         <div class="app-header">
             <h1>ROCKY HIJAB</h1>
-            <p>CASIER VVIP - INDEXEDDB</p>
+            <p>CASIER VVIP</p>
         </div>
 
         <div class="main-content">
@@ -996,317 +962,144 @@
     <textarea id="hiddenClipboard" style="position:fixed;top:-5000px;left:-5000px;"></textarea>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/idb@7/build/umd.min.js"></script>
     <script>
-        // ==================== INDEXEDDB SETUP ====================
-        const DB_NAME = 'RockyHijabDB';
-        const DB_VERSION = 1;
+        const baseMap = { 'P': 1, 'I': 2, 'N': 3, 'T': 4, 'U': 5, 'S': 6, 'O': 7, 'R': 8, 'G': 9, 'A': 0 };
+        const ADMIN_PASS = "170845";
+        const ADMIN_WA = "6285172107731";
         
-        // Store names
-        const STORES = {
-            CONTACTS: 'contacts',
-            ITEMS: 'items',
-            RIWAYAT: 'riwayat',
-            CART: 'cart',
-            SESSION: 'session'
-        };
-
-        let db = null;
-        let dbReady = false;
+        // Inisialisasi IndexedDB
+        const dbName = 'rocky_hijab_db';
+        const dbVersion = 1;
         
-        // In-memory cache untuk akses cepat
+        let db;
+        let cart = [];
         let memberContacts = [];
         let savedItemNames = [];
         let riwayatTransaksi = [];
-        let cart = [];
-        let currentSession = { memberName: '', memberWa: '' };
+        
+        let currentMode = 'sale';
+        let isKodeHidden = true;
+        let pendingAction = null;
+        let contactToDelete = null;
+        let filteredRiwayat = [];
+        let selectedPaperSize = '58mm';
 
-        // Queue operasi yang harus menunggu DB siap
-        let pendingOperations = [];
-
-        // Loading indicator
-        function showLoading(show = true) {
-            document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
-        }
-
-        // Inisialisasi IndexedDB
-        function initDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, DB_VERSION);
-                
-                request.onerror = (event) => {
-                    console.error('IndexedDB error:', event.target.error);
-                    showAlert('Gagal membuka database', true);
-                    reject(event.target.error);
-                };
-                
-                request.onsuccess = (event) => {
-                    db = event.target.result;
-                    dbReady = true;
-                    console.log('IndexedDB opened successfully');
-                    
-                    // Handle koneksi terputus
-                    db.onclose = () => {
-                        dbReady = false;
-                        console.log('Database connection closed');
-                    };
-                    
-                    db.onversionchange = () => {
-                        db.close();
-                        dbReady = false;
-                        console.log('Database version changed');
-                    };
-                    
-                    // Proses operasi yang tertunda
-                    pendingOperations.forEach(op => op());
-                    pendingOperations = [];
-                    
-                    resolve(db);
-                };
-                
-                request.onupgradeneeded = (event) => {
-                    const db = event.target.result;
-                    
-                    // Buat object stores jika belum ada
-                    if (!db.objectStoreNames.contains(STORES.CONTACTS)) {
-                        const contactStore = db.createObjectStore(STORES.CONTACTS, { keyPath: 'name' });
-                        contactStore.createIndex('wa', 'wa', { unique: false });
-                        contactStore.createIndex('poin', 'poin', { unique: false });
-                    }
-                    
-                    if (!db.objectStoreNames.contains(STORES.ITEMS)) {
-                        const itemStore = db.createObjectStore(STORES.ITEMS, { keyPath: 'name', autoIncrement: false });
-                        itemStore.createIndex('name', 'name', { unique: true });
-                    }
-                    
-                    if (!db.objectStoreNames.contains(STORES.RIWAYAT)) {
-                        const riwayatStore = db.createObjectStore(STORES.RIWAYAT, { keyPath: 'waktu' });
-                        riwayatStore.createIndex('member', 'member', { unique: false });
-                        riwayatStore.createIndex('waktu', 'waktu', { unique: false });
-                    }
-                    
-                    if (!db.objectStoreNames.contains(STORES.CART)) {
-                        db.createObjectStore(STORES.CART, { keyPath: 'id' });
-                    }
-                    
-                    if (!db.objectStoreNames.contains(STORES.SESSION)) {
-                        db.createObjectStore(STORES.SESSION, { keyPath: 'key' });
-                    }
-                    
-                    console.log('Database upgrade complete');
-                };
-            });
-        }
-
-        // Helper untuk operasi database dengan transaksi
-        async function dbOperation(storeName, mode, callback) {
-            if (!dbReady) {
-                return new Promise((resolve) => {
-                    pendingOperations.push(() => {
-                        resolve(dbOperation(storeName, mode, callback));
-                    });
-                });
-            }
-            
-            return new Promise((resolve, reject) => {
-                try {
-                    const transaction = db.transaction(storeName, mode);
-                    const store = transaction.objectStore(storeName);
-                    
-                    transaction.oncomplete = () => resolve(result);
-                    transaction.onerror = (e) => {
-                        console.error('Transaction error:', e.target.error);
-                        reject(e.target.error);
-                    };
-                    
-                    let result;
-                    const callbackResult = callback(store);
-                    
-                    if (callbackResult instanceof Promise) {
-                        callbackResult.then(r => {
-                            result = r;
-                        }).catch(reject);
-                    } else {
-                        result = callbackResult;
-                    }
-                } catch (error) {
-                    console.error('DB Operation error:', error);
-                    reject(error);
-                }
-            });
-        }
-
-        // ==================== LOAD ALL DATA ====================
-        async function loadAllData() {
-            showLoading(true);
+        // Fungsi inisialisasi IndexedDB
+        async function initDB() {
             try {
-                // Load contacts
-                await dbOperation(STORES.CONTACTS, 'readonly', (store) => {
-                    return new Promise((resolve, reject) => {
-                        const request = store.getAll();
-                        request.onsuccess = () => {
-                            memberContacts = request.result || [];
-                            resolve();
-                        };
-                        request.onerror = reject;
-                    });
+                db = await idb.openDB(dbName, dbVersion, {
+                    upgrade(db) {
+                        // Buat object stores jika belum ada
+                        if (!db.objectStoreNames.contains('cart')) {
+                            db.createObjectStore('cart', { keyPath: 'id' });
+                        }
+                        if (!db.objectStoreNames.contains('contacts')) {
+                            db.createObjectStore('contacts', { keyPath: 'name' });
+                        }
+                        if (!db.objectStoreNames.contains('itemNames')) {
+                            db.createObjectStore('itemNames', { keyPath: 'name' });
+                        }
+                        if (!db.objectStoreNames.contains('riwayat')) {
+                            const riwayatStore = db.createObjectStore('riwayat', { keyPath: 'waktu' });
+                            riwayatStore.createIndex('by_waktu', 'waktu');
+                            riwayatStore.createIndex('by_member', 'member');
+                        }
+                    }
                 });
                 
-                // Load items
-                await dbOperation(STORES.ITEMS, 'readonly', (store) => {
-                    return new Promise((resolve, reject) => {
-                        const request = store.getAll();
-                        request.onsuccess = () => {
-                            savedItemNames = (request.result || []).map(item => item.name);
-                            resolve();
-                        };
-                        request.onerror = reject;
-                    });
-                });
+                // Load semua data
+                await loadAllData();
                 
-                // Load riwayat
-                await dbOperation(STORES.RIWAYAT, 'readonly', (store) => {
-                    return new Promise((resolve, reject) => {
-                        const request = store.getAll();
-                        request.onsuccess = () => {
-                            riwayatTransaksi = request.result || [];
-                            resolve();
-                        };
-                        request.onerror = reject;
-                    });
-                });
-                
-                // Load cart
-                await dbOperation(STORES.CART, 'readonly', (store) => {
-                    return new Promise((resolve, reject) => {
-                        const request = store.getAll();
-                        request.onsuccess = () => {
-                            cart = request.result || [];
-                            resolve();
-                        };
-                        request.onerror = reject;
-                    });
-                });
-                
-                // Load session
-                await dbOperation(STORES.SESSION, 'readonly', (store) => {
-                    return new Promise((resolve, reject) => {
-                        const request = store.get('currentMember');
-                        request.onsuccess = () => {
-                            if (request.result) {
-                                currentSession = request.result;
-                                document.getElementById('memberName').value = currentSession.memberName || '';
-                                document.getElementById('memberWa').value = currentSession.memberWa || '';
-                            }
-                            resolve();
-                        };
-                        request.onerror = reject;
-                    });
-                });
-                
-                console.log('All data loaded from IndexedDB');
-                renderTable();
+                // Update UI setelah data dimuat
                 checkMemberPoin();
+                renderTable();
                 checkMemberData();
+                filterRiwayat();
                 
             } catch (error) {
-                console.error('Error loading data:', error);
-                showAlert('Gagal memuat data', true);
-            } finally {
-                showLoading(false);
+                showAlert("Gagal inisialisasi database: " + error.message, true);
             }
         }
 
-        // ==================== SAVE FUNCTIONS ====================
-        async function saveContacts() {
-            await dbOperation(STORES.CONTACTS, 'readwrite', async (store) => {
-                // Clear all existing
-                await new Promise((resolve, reject) => {
-                    const clearRequest = store.clear();
-                    clearRequest.onsuccess = resolve;
-                    clearRequest.onerror = reject;
-                });
+        // Fungsi untuk load semua data dari IndexedDB
+        async function loadAllData() {
+            try {
+                // Load cart
+                cart = await db.getAll('cart') || [];
                 
-                // Save all contacts
-                for (const contact of memberContacts) {
-                    await new Promise((resolve, reject) => {
-                        const request = store.put(contact);
-                        request.onsuccess = resolve;
-                        request.onerror = reject;
-                    });
-                }
-            });
+                // Load contacts
+                memberContacts = await db.getAll('contacts') || [];
+                
+                // Load item names
+                const items = await db.getAll('itemNames') || [];
+                savedItemNames = items.map(item => item.name);
+                
+                // Load riwayat
+                riwayatTransaksi = await db.getAll('riwayat') || [];
+                riwayatTransaksi.sort((a, b) => new Date(b.waktu) - new Date(a.waktu));
+                
+            } catch (error) {
+                showAlert("Gagal load data: " + error.message, true);
+            }
         }
 
-        async function saveItems() {
-            await dbOperation(STORES.ITEMS, 'readwrite', async (store) => {
-                await new Promise((resolve, reject) => {
-                    const clearRequest = store.clear();
-                    clearRequest.onsuccess = resolve;
-                    clearRequest.onerror = reject;
-                });
-                
-                for (const name of savedItemNames) {
-                    await new Promise((resolve, reject) => {
-                        const request = store.put({ name });
-                        request.onsuccess = resolve;
-                        request.onerror = reject;
-                    });
-                }
-            });
-        }
-
-        async function saveRiwayat() {
-            await dbOperation(STORES.RIWAYAT, 'readwrite', async (store) => {
-                await new Promise((resolve, reject) => {
-                    const clearRequest = store.clear();
-                    clearRequest.onsuccess = resolve;
-                    clearRequest.onerror = reject;
-                });
-                
-                for (const r of riwayatTransaksi) {
-                    await new Promise((resolve, reject) => {
-                        const request = store.put(r);
-                        request.onsuccess = resolve;
-                        request.onerror = reject;
-                    });
-                }
-            });
-        }
-
+        // Fungsi untuk menyimpan cart ke IndexedDB
         async function saveCart() {
-            await dbOperation(STORES.CART, 'readwrite', async (store) => {
-                await new Promise((resolve, reject) => {
-                    const clearRequest = store.clear();
-                    clearRequest.onsuccess = resolve;
-                    clearRequest.onerror = reject;
-                });
-                
+            try {
+                const tx = db.transaction('cart', 'readwrite');
+                await tx.store.clear();
                 for (const item of cart) {
-                    await new Promise((resolve, reject) => {
-                        const request = store.put(item);
-                        request.onsuccess = resolve;
-                        request.onerror = reject;
-                    });
+                    await tx.store.add(item);
                 }
-            });
+                await tx.done;
+            } catch (error) {
+                showAlert("Gagal simpan cart: " + error.message, true);
+            }
         }
 
-        async function saveSession() {
-            await dbOperation(STORES.SESSION, 'readwrite', (store) => {
-                store.put({
-                    key: 'currentMember',
-                    memberName: document.getElementById('memberName').value,
-                    memberWa: document.getElementById('memberWa').value
-                });
-            });
+        // Fungsi untuk menyimpan contacts ke IndexedDB
+        async function saveContacts() {
+            try {
+                const tx = db.transaction('contacts', 'readwrite');
+                await tx.store.clear();
+                for (const contact of memberContacts) {
+                    await tx.store.add(contact);
+                }
+                await tx.done;
+            } catch (error) {
+                showAlert("Gagal simpan kontak: " + error.message, true);
+            }
         }
 
-        // Modifikasi fungsi saveCurrentSession
-        function saveCurrentSession() {
-            saveSession().catch(e => console.error('Error saving session:', e));
+        // Fungsi untuk menyimpan item names ke IndexedDB
+        async function saveItemNames() {
+            try {
+                const tx = db.transaction('itemNames', 'readwrite');
+                await tx.store.clear();
+                for (const name of savedItemNames) {
+                    await tx.store.add({ name });
+                }
+                await tx.done;
+            } catch (error) {
+                showAlert("Gagal simpan item names: " + error.message, true);
+            }
         }
 
-        // ==================== MODIFIED FUNCTIONS ====================
+        // Fungsi untuk menyimpan riwayat ke IndexedDB
+        async function saveRiwayat() {
+            try {
+                const tx = db.transaction('riwayat', 'readwrite');
+                await tx.store.clear();
+                for (const item of riwayatTransaksi) {
+                    await tx.store.add(item);
+                }
+                await tx.done;
+            } catch (error) {
+                showAlert("Gagal simpan riwayat: " + error.message, true);
+            }
+        }
+
         function showAlert(text, isError = false) {
             const el = document.getElementById('customAlert');
             el.innerText = text;
@@ -1344,7 +1137,6 @@
             document.getElementById('size80').classList.toggle('active', size === '80mm');
         }
 
-        // FUNGSI COPY STRUK KE CLIPBOARD
         function copyStrukToClipboard(fromPreview = false) {
             const struk = generateStrukText();
             const textArea = document.getElementById('hiddenClipboard');
@@ -1362,7 +1154,6 @@
             }
         }
 
-        // FUNGSI GENERATE PDF
         function downloadPDF(size) {
             const { jsPDF } = window.jspdf;
             
@@ -1456,7 +1247,6 @@
             toggleModal('printPreviewModal');
         }
 
-        // FUNGSI Generate teks struk (sama seperti preview)
         function generateStrukText() {
             const name = document.getElementById('memberName').value.trim().toUpperCase() || 'NON MEMBER';
             const wa = document.getElementById('memberWa').value.trim() || '-';
@@ -1486,7 +1276,6 @@
             struk += `WA    : ${wa}\n`;
             struk += "================================\n\n";
             
-            // Items
             cart.forEach(item => {
                 const sign = item.type === 'retur' ? '-' : '';
                 let itemName = item.name;
@@ -1525,7 +1314,6 @@
             return struk;
         }
 
-        // FUNGSI Generate struk dari data riwayat (STRUK LENGKAP)
         function generateRiwayatStruk(r) {
             const tgl = new Date(r.waktu).toLocaleString('id-ID', { 
                 day: '2-digit', 
@@ -1546,7 +1334,6 @@
             struk += `WA    : ${r.wa}\n`;
             struk += "================================\n\n";
             
-            // Items (LENGKAP DENGAN DETAIL)
             r.items.forEach(item => {
                 const sign = item.type === 'retur' ? '-' : '';
                 let itemName = item.name;
@@ -1580,7 +1367,6 @@
             return struk;
         }
 
-        // FUNGSI Kirim struk langsung ke WA konsumen
         function sendStrukToCustomer() {
             if (cart.length === 0) {
                 showAlert("KERANJANG KOSONG", true);
@@ -1595,35 +1381,27 @@
                 return; 
             }
 
-            // Generate struk
             const struk = generateStrukText();
             
-            // Format nomor WA
             let waLink = wa.replace(/[^0-9]/g, ''); 
             if (waLink.startsWith('0')) waLink = '62' + waLink.substring(1);
             
-            // Kirim ke WA
             window.open(`https://wa.me/${waLink}?text=${encodeURIComponent(struk)}`, '_blank');
             
             showAlert("STRUK TELAH DIKIRIM KE KONSUMEN");
         }
 
-        // FUNGSI Kirim struk riwayat ke WA konsumen (STRUK LENGKAP)
         function sendRiwayatToCustomer(riwayat) {
-            // Generate struk lengkap dari data riwayat
             const struk = generateRiwayatStruk(riwayat);
             
-            // Format nomor WA
             let waLink = riwayat.wa.replace(/[^0-9]/g, ''); 
             if (waLink.startsWith('0')) waLink = '62' + waLink.substring(1);
             
-            // Kirim ke WA
             window.open(`https://wa.me/${waLink}?text=${encodeURIComponent(struk)}`, '_blank');
             
             showAlert("STRUK RIWAYAT TELAH DIKIRIM KE KONSUMEN");
         }
 
-        // FUNGSI Bagikan beberapa riwayat terpilih (STRUK LENGKAP)
         function shareSelectedRiwayat() {
             const checkboxes = document.querySelectorAll('.riwayat-checkbox:checked');
             if (checkboxes.length === 0) {
@@ -1640,7 +1418,6 @@
             selectedRiwayat.sort((a,b) => new Date(a.waktu) - new Date(b.waktu));
             
             selectedRiwayat.forEach((r, idx) => {
-                // Generate struk lengkap untuk setiap transaksi
                 const struk = generateRiwayatStruk(r);
                 msg += struk;
                 if (idx < selectedRiwayat.length - 1) {
@@ -1652,35 +1429,28 @@
 
             msg += "\n_Dikirim dari VVIP System_";
 
-            // Kirim ke nomor tujuan (bisa diisi manual atau kosong)
             window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
         }
 
-        // --- MANAJEMEN DATA & BACKUP ---
-        async function copyDataToClipboard() {
-            showLoading(true);
+        function copyDataToClipboard() {
+            const data = { contacts: memberContacts, items: savedItemNames, riwayat: riwayatTransaksi, ts: Date.now() };
+            const jsonStr = JSON.stringify(data);
+            const textArea = document.getElementById('hiddenClipboard');
+            textArea.value = jsonStr;
+            textArea.select();
+            textArea.setSelectionRange(0, 99999);
+            
             try {
-                const data = { contacts: memberContacts, items: savedItemNames, riwayat: riwayatTransaksi, ts: Date.now() };
-                const jsonStr = JSON.stringify(data);
-                const textArea = document.getElementById('hiddenClipboard');
-                textArea.value = jsonStr;
-                textArea.select();
-                textArea.setSelectionRange(0, 99999);
-                
                 document.execCommand('copy');
                 showAlert("DATA BERHASIL DISALIN");
             } catch (err) {
                 showAlert("GAGAL MENYALIN DATA", true);
-            } finally {
-                showLoading(false);
             }
         }
 
-        async function importFromClipboard() {
+        function importFromClipboard() {
             const input = prompt("TEMPEL DATA (JSON) YANG SUDAH DISALIN:");
             if (!input) return;
-            
-            showLoading(true);
             try {
                 const d = JSON.parse(input);
                 if (d.contacts) {
@@ -1688,21 +1458,22 @@
                     savedItemNames = d.items || [];
                     riwayatTransaksi = d.riwayat || [];
                     
-                    await saveContacts();
-                    await saveItems();
-                    await saveRiwayat();
-                    
-                    showAlert("DATA BERHASIL DITEMPEL & DISIMPAN");
-                    checkMemberPoin();
-                    renderContactList();
-                    filterRiwayat();
+                    // Simpan ke IndexedDB
+                    Promise.all([
+                        saveContacts(),
+                        saveItemNames(),
+                        saveRiwayat()
+                    ]).then(() => {
+                        showAlert("DATA BERHASIL DITEMPEL & DISIMPAN");
+                        checkMemberPoin();
+                        renderContactList();
+                        filterRiwayat();
+                    });
                 } else {
                     showAlert("FORMAT DATA TIDAK VALID", true);
                 }
             } catch (e) {
                 showAlert("DATA BUKAN FORMAT JSON VALID", true);
-            } finally {
-                showLoading(false);
             }
         }
 
@@ -1719,21 +1490,20 @@
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `rocky_v12_backup.json`; a.click();
         }
 
-        async function importDataJSON(e) {
+        function importDataJSON(e) {
             const f = e.target.files[0]; if(!f) return;
-            
-            showLoading(true);
-            const r = new FileReader(); 
-            r.onload = async (ev) => {
+            const r = new FileReader(); r.onload = async (ev) => {
                 try {
                     const d = JSON.parse(ev.target.result);
                     memberContacts = d.contacts || [];
                     savedItemNames = d.items || [];
                     riwayatTransaksi = d.riwayat || [];
                     
-                    await saveContacts();
-                    await saveItems();
-                    await saveRiwayat();
+                    await Promise.all([
+                        saveContacts(),
+                        saveItemNames(),
+                        saveRiwayat()
+                    ]);
                     
                     showAlert("DATA DIIMPORT"); 
                     toggleModal('dataModal'); 
@@ -1742,48 +1512,36 @@
                     filterRiwayat();
                 } catch(e) { 
                     showAlert("FILE TIDAK VALID", true); 
-                } finally {
-                    showLoading(false);
                 }
-            }; 
-            r.readAsText(f);
+            }; r.readAsText(f);
         }
 
-        async function confirmDeleteAllData() {
+        function confirmDeleteAllData() {
             if (confirm("HAPUS SEMUA DATA APLIKASI?")) {
                 askPassword(async () => {
-                    showLoading(true);
-                    try {
-                        // Clear all stores
-                        await dbOperation(STORES.CONTACTS, 'readwrite', (store) => store.clear());
-                        await dbOperation(STORES.ITEMS, 'readwrite', (store) => store.clear());
-                        await dbOperation(STORES.RIWAYAT, 'readwrite', (store) => store.clear());
-                        await dbOperation(STORES.CART, 'readwrite', (store) => store.clear());
-                        await dbOperation(STORES.SESSION, 'readwrite', (store) => store.clear());
-                        
-                        cart = [];
-                        memberContacts = [];
-                        savedItemNames = [];
-                        riwayatTransaksi = [];
-                        
-                        document.getElementById('memberName').value = '';
-                        document.getElementById('memberWa').value = '';
-                        renderTable();
-                        renderContactList();
-                        filterRiwayat();
-                        showAlert("SEMUA DATA DIHAPUS");
-                    } catch (error) {
-                        showAlert("GAGAL MENGHAPUS DATA", true);
-                    } finally {
-                        showLoading(false);
-                    }
+                    // Hapus semua data dari IndexedDB
+                    const tx = db.transaction(['cart', 'contacts', 'itemNames', 'riwayat'], 'readwrite');
+                    await tx.objectStore('cart').clear();
+                    await tx.objectStore('contacts').clear();
+                    await tx.objectStore('itemNames').clear();
+                    await tx.objectStore('riwayat').clear();
+                    
+                    cart = [];
+                    memberContacts = [];
+                    savedItemNames = [];
+                    riwayatTransaksi = [];
+                    
+                    document.getElementById('memberName').value = '';
+                    document.getElementById('memberWa').value = '';
+                    renderTable();
+                    renderContactList();
+                    filterRiwayat();
+                    showAlert("SEMUA DATA DIHAPUS");
                 });
             }
         }
 
-        // --- HARGA & TRANSAKSI ---
         function calcPrice(kode) {
-            const baseMap = { 'P': 1, 'I': 2, 'N': 3, 'T': 4, 'U': 5, 'S': 6, 'O': 7, 'R': 8, 'G': 9, 'A': 0 };
             const input = kode.toUpperCase().replace(/\s/g, '');
             if (!input) return 0;
             let total = 0; let temp = input;
@@ -1827,7 +1585,6 @@
             renderTable();
         }
 
-        // Fungsi untuk mengecek apakah data member lengkap
         function checkMemberData() {
             const name = document.getElementById('memberName').value.trim();
             const wa = document.getElementById('memberWa').value.trim();
@@ -1880,7 +1637,6 @@
                 ind.style.display = "block"; ind.innerText = `+${pb.toLocaleString('id-ID')} POIN`;
             } else ind.style.display = "none";
             
-            // Update status tombol setelah render (jika cart berubah)
             checkMemberData();
         }
 
@@ -1892,12 +1648,11 @@
             
             if (!savedItemNames.includes(name)) {
                 savedItemNames.push(name);
-                await saveItems();
+                await saveItemNames();
             }
             
             cart.push({ id: Date.now(), name: currentMode === 'retur' ? name + " (RETUR)" : name, code, qty: parseInt(qEl.value), priceUnit: price, subtotal: price * parseInt(qEl.value), type: currentMode });
             await saveCart();
-            
             renderTable();
             nEl.value = ""; cEl.value = ""; qEl.value = "1";
             document.getElementById('pricePreview').style.display = 'none';
@@ -1951,80 +1706,60 @@
 
             cart = [];
             await saveCart();
-            
             document.getElementById('memberName').value = '';
             document.getElementById('memberWa').value = '';
             document.getElementById('inputPoinTukar').value = '';
-            await saveSession();
-            
+            saveCurrentSession();
             renderTable();
             showAlert("TRANSAKSI & POIN BERHASIL DISIMPAN");
         }
 
-        // FUNGSI UTAMA: SELESAIKAN, SIMPAN POIN, DAN COPY STRUK
         async function processFinalTransaction() {
             if (cart.length === 0) return;
-            
             const d = getTransactionData();
             if (!d.name || !d.wa) { 
                 showAlert("NAMA & WA WAJIB DIISI", true); 
                 return; 
             }
 
-            showLoading(true);
-            try {
-                // Simpan transaksi
-                const waktu = new Date().toISOString();
-                const items = cart.map(i => ({ name: i.name, code: i.code, qty: i.qty, priceUnit: i.priceUnit, subtotal: i.subtotal, type: i.type }));
-                riwayatTransaksi.push({
-                    waktu,
-                    member: d.name,
-                    wa: d.wa,
-                    items: items,
-                    tSale: d.tSale,
-                    tRetur: d.tRetur,
-                    pTukar: d.pTukar,
-                    sisaBayar: d.sisaBayar,
-                    poinGet: d.poinGet,
-                    poinAkhir: d.poinAkhir
-                });
-                await saveRiwayat();
+            const waktu = new Date().toISOString();
+            const items = cart.map(i => ({ name: i.name, code: i.code, qty: i.qty, priceUnit: i.priceUnit, subtotal: i.subtotal, type: i.type }));
+            riwayatTransaksi.push({
+                waktu,
+                member: d.name,
+                wa: d.wa,
+                items: items,
+                tSale: d.tSale,
+                tRetur: d.tRetur,
+                pTukar: d.pTukar,
+                sisaBayar: d.sisaBayar,
+                poinGet: d.poinGet,
+                poinAkhir: d.poinAkhir
+            });
+            await saveRiwayat();
 
-                // Update poin member
-                let mIdx = memberContacts.findIndex(c => c.name === d.name);
-                if (mIdx === -1) {
-                    memberContacts.push({ name: d.name, wa: d.wa, poin: d.poinAkhir });
-                } else {
-                    memberContacts[mIdx].wa = d.wa;
-                    memberContacts[mIdx].poin = d.poinAkhir;
-                }
-                await saveContacts();
-
-                // COPY STRUK KE CLIPBOARD
-                copyStrukToClipboard();
-
-                // Bersihkan keranjang dan form
-                cart = [];
-                await saveCart();
-                
-                document.getElementById('memberName').value = '';
-                document.getElementById('memberWa').value = '';
-                document.getElementById('inputPoinTukar').value = '';
-                await saveSession();
-                
-                renderTable();
-                
-                // Tampilkan notifikasi
-                showAlert("✓ TRANSAKSI SELESAI & STRUK DISALIN");
-            } catch (error) {
-                showAlert("GAGAL MENYIMPAN TRANSAKSI", true);
-                console.error(error);
-            } finally {
-                showLoading(false);
+            let mIdx = memberContacts.findIndex(c => c.name === d.name);
+            if (mIdx === -1) {
+                memberContacts.push({ name: d.name, wa: d.wa, poin: d.poinAkhir });
+            } else {
+                memberContacts[mIdx].wa = d.wa;
+                memberContacts[mIdx].poin = d.poinAkhir;
             }
+            await saveContacts();
+
+            copyStrukToClipboard();
+
+            cart = [];
+            await saveCart();
+            document.getElementById('memberName').value = '';
+            document.getElementById('memberWa').value = '';
+            document.getElementById('inputPoinTukar').value = '';
+            saveCurrentSession();
+            renderTable();
+            
+            showAlert("✓ TRANSAKSI SELESAI & STRUK DISALIN");
         }
 
-        // --- UI HELPERS ---
         function switchTab(mode) {
             currentMode = mode;
             document.getElementById('tabBelanja').className = mode === 'sale' ? 'tab-btn active' : 'tab-btn';
@@ -2140,7 +1875,8 @@
         }
         
         function saveCurrentSession() { 
-            saveSession().catch(e => console.error('Error saving session:', e));
+            localStorage.setItem('rocky_current_name', document.getElementById('memberName').value); 
+            localStorage.setItem('rocky_current_wa', document.getElementById('memberWa').value); 
             checkMemberPoin(); 
             checkMemberData();
         }
@@ -2163,18 +1899,13 @@
             const amount = parseInt(document.getElementById(inputId).value) || 0;
             if (amount === 0) return;
             askPassword(async () => {
-                showLoading(true);
-                try {
-                    const idx = memberContacts.findIndex(c => c.name === name);
-                    if (idx > -1) {
-                        memberContacts[idx].poin = Math.max(0, (memberContacts[idx].poin || 0) + amount);
-                        await saveContacts();
-                        renderContactList();
-                        checkMemberPoin();
-                        showAlert("POIN DIPERBARUI");
-                    }
-                } finally {
-                    showLoading(false);
+                const idx = memberContacts.findIndex(c => c.name === name);
+                if (idx > -1) {
+                    memberContacts[idx].poin = Math.max(0, (memberContacts[idx].poin || 0) + amount);
+                    await saveContacts();
+                    renderContactList();
+                    checkMemberPoin();
+                    showAlert("POIN DIPERBARUI");
                 }
             });
         }
@@ -2187,17 +1918,12 @@
         async function verifyDeleteContact() {
             const password = document.getElementById('deleteContactPassword').value;
             if (password === ADMIN_PASS) {
-                showLoading(true);
-                try {
-                    memberContacts = memberContacts.filter(c => c.name !== contactToDelete);
-                    await saveContacts();
-                    toggleModal('deleteContactModal');
-                    renderContactList();
-                    checkMemberPoin();
-                    showAlert("KONTAK DIHAPUS");
-                } finally {
-                    showLoading(false);
-                }
+                memberContacts = memberContacts.filter(c => c.name !== contactToDelete);
+                await saveContacts();
+                toggleModal('deleteContactModal');
+                renderContactList();
+                checkMemberPoin();
+                showAlert("KONTAK DIHAPUS");
             } else {
                 showAlert("SANDI SALAH!", true);
             }
@@ -2228,7 +1954,6 @@
             });
         }
 
-        // --- RIWAYAT FUNCTIONS ---
         function filterRiwayat() {
             const search = document.getElementById('searchRiwayat').value.trim().toUpperCase();
             const startDate = document.getElementById('startDate').value;
@@ -2291,7 +2016,6 @@
                         <div class="riwayat-poindetail">
                             +${r.poinGet} POIN | Sisa: ${r.poinAkhir}
                         </div>
-                        <!-- TOMBOL KIRIM STRUK LENGKAP KE WA KONSUMEN -->
                         <button class="btn-wa-riwayat" onclick='sendRiwayatToCustomer(${JSON.stringify(r).replace(/'/g, "\\'")})'>
                             <i>📤</i> KIRIM STRUK LENGKAP KE KONSUMEN
                         </button>
@@ -2308,15 +2032,10 @@
 
         async function clearRiwayat() {
             if (confirm("HAPUS SEMUA RIWAYAT?")) {
-                showLoading(true);
-                try {
-                    riwayatTransaksi = [];
-                    await saveRiwayat();
-                    filterRiwayat();
-                    showAlert("RIWAYAT DIHAPUS");
-                } finally {
-                    showLoading(false);
-                }
+                riwayatTransaksi = [];
+                await saveRiwayat();
+                filterRiwayat();
+                showAlert("RIWAYAT DIHAPUS");
             }
         }
 
@@ -2356,7 +2075,6 @@
                     <p><strong>Poin Didapat:</strong> +${r.poinGet}</p>
                     <p><strong>Sisa Poin:</strong> ${r.poinAkhir}</p>
                 </div>
-                <!-- TOMBOL KIRIM STRUK LENGKAP DI MODAL DETAIL -->
                 <button class="btn-wa" style="margin-top:15px;" onclick='sendRiwayatToCustomer(${JSON.stringify(r).replace(/'/g, "\\'")})'>
                     📤 KIRIM STRUK LENGKAP KE WA KONSUMEN
                 </button>
@@ -2382,32 +2100,20 @@
             }
         }
 
-        // Inisialisasi saat halaman dimuat
         window.onload = async () => {
-            const baseMap = { 'P': 1, 'I': 2, 'N': 3, 'T': 4, 'U': 5, 'S': 6, 'O': 7, 'R': 8, 'G': 9, 'A': 0 };
-            const ADMIN_PASS = "170845";
-            const ADMIN_WA = "6285172107731";
-            
-            let currentMode = 'sale';
-            let isKodeHidden = true;
-            let pendingAction = null;
-            let contactToDelete = null;
-            let filteredRiwayat = [];
-            let selectedPaperSize = '58mm';
-            
-            // Inisialisasi database
+            // Inisialisasi IndexedDB terlebih dahulu
             await initDB();
-            await loadAllData();
             
-            // Set tanggal default
+            document.getElementById('memberName').value = localStorage.getItem('rocky_current_name') || '';
+            document.getElementById('memberWa').value = localStorage.getItem('rocky_current_wa') || '';
+            checkMemberPoin(); 
+            renderTable();
+            checkMemberData();
+            switchTab('sale');
+            
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('startDate').value = today;
             document.getElementById('endDate').value = today;
-            
-            renderTable();
-            checkMemberPoin();
-            checkMemberData();
-            switchTab('sale');
         };
     </script>
 </body>
